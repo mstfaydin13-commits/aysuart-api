@@ -1,9 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime
 import math
+import uuid
 
 app = FastAPI(title="Aysu Art - Star Map API")
 
@@ -13,6 +15,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+file_store = {}
 
 class StarMapRequest(BaseModel):
     date: str
@@ -33,6 +37,27 @@ class StarMapResponse(BaseModel):
 def root():
     return {"status": "ok", "service": "Aysu Art Star Map API"}
 
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        file_id = str(uuid.uuid4())
+        file_store[file_id] = {
+            "data": contents,
+            "content_type": file.content_type or "image/jpeg",
+            "filename": file.filename,
+        }
+        return {"file_id": file_id, "url": f"/api/files/{file_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/files/{file_id}")
+def get_file(file_id: str):
+    if file_id not in file_store:
+        raise HTTPException(status_code=404, detail="Dosya bulunamadi")
+    f = file_store[file_id]
+    return Response(content=f["data"], media_type=f["content_type"])
+
 @app.post("/api/starmap", response_model=StarMapResponse)
 async def compute_starmap(req: StarMapRequest):
     try:
@@ -41,7 +66,7 @@ async def compute_starmap(req: StarMapRequest):
         try:
             d = datetime.strptime(req.date, "%Y-%m-%d")
         except Exception:
-            raise HTTPException(status_code=400, detail="Geçersiz tarih")
+            raise HTTPException(status_code=400, detail="Gecersiz tarih")
 
     seed = int(d.timestamp()) ^ int(req.lat * 1000) ^ int(req.lon * 1000)
     rng_state = [seed & 0xFFFFFFFF]
